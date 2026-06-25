@@ -12,3 +12,5 @@
 - [ ] Agenda view listing tasks for a particular agenda, separated by isWaiting
 - [ ] Assign a context to a task
 - [ ] Search across tasks and projects
+- [ ] Toggle isWaiting on a task
+- [ ] Track what a task is waiting for
