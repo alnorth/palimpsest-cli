@@ -227,6 +227,13 @@ function App() {
       },
     },
     {
+      key: 's', label: 'star', row: 'state',
+      when: currentTask?.status === 'open',
+      action: () => {
+        appendAndRefresh(updateTask(state, { taskId: currentTask!.id, patch: { isStarred: currentTask!.isStarred !== true } }))
+      },
+    },
+    {
       key: 'a', label: 'agenda', row: 'state',
       when: currentTask?.status === 'open',
       action: () => {
@@ -532,6 +539,7 @@ function App() {
             {activeTask?.dueDate !== undefined ? <Text dimColor>due        {activeTask.dueDate}</Text> : null}
             {activeTask?.completedAt !== undefined ? <Text dimColor>completed  {formatDateTime(activeTask.completedAt)}</Text> : null}
             {activeTask?.isNext === true ? <Text dimColor>next action</Text> : null}
+            {activeTask?.isStarred === true ? <Text dimColor>starred</Text> : null}
           </Box>
         </Box>
       )

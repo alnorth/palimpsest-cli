@@ -27,7 +27,7 @@ export function TaskList({ tasks, selected, state, showProject = false, emptyMes
             key={task.id}
             isSelected={isSelected}
             color={isSelected ? 'blue' : undefined}
-            title={<><Text color="yellow">{task.isNext === true ? '→' : ' '} </Text>{task.title}</>}
+            title={<><Text color="yellow">{task.isNext === true ? '→' : ' '} </Text><Text color="yellow">{task.isStarred === true ? '★ ' : ''}</Text>{task.title}</>}
           >
             {task.description ? <Meta>¶</Meta> : null}
             {project !== undefined ? <Meta>{project.name}</Meta> : null}
