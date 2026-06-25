@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
 import { TaskList } from './TaskList.js'
+import { Row, Meta } from './Row.js'
 import TextInput from 'ink-text-input'
 import {
   PalimpsestStore, CLEAR,
   listTasks, listProjects, listSpheres, listAgendas,
-  createTask, updateTask, completeTask, createProject, updateProject, createSphere, createAgenda,
+  createTask, updateTask, completeTask, createProject, updateProject, archiveProject, unarchiveProject, createSphere, createAgenda,
 } from 'palimpsest'
 import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
 import { homedir } from 'node:os'
@@ -40,9 +41,10 @@ function App() {
     () => activeSphere !== undefined ? listTasks(state, { sphereId: activeSphere.id, status: 'open' }) : [],
     [state, activeSphere],
   )
+  const [showArchived, setShowArchived] = useState(false)
   const projects = useMemo(
-    () => activeSphere !== undefined ? listProjects(state, { sphereId: activeSphere.id }) : [],
-    [state, activeSphere],
+    () => activeSphere !== undefined ? listProjects(state, { sphereId: activeSphere.id, ...(showArchived ? {} : { isArchived: false }) }) : [],
+    [state, activeSphere, showArchived],
   )
   const agendas = useMemo(
     () => activeSphere !== undefined ? listAgendas(state, { sphereId: activeSphere.id }) : [],
@@ -185,6 +187,18 @@ function App() {
         const task = (view === 'project' ? projectTasks : tasks)[selected]
         if (task !== undefined) { setFormValue(task.title); setMode('editing-task') }
       }
+    }
+    if (input === 'x' && view === 'projects') {
+      const project = projects[selected]
+      if (project !== undefined) {
+        store.appendEvents(project.isArchived ? unarchiveProject(state, project.id) : archiveProject(state, project.id))
+        refreshState()
+        if (!showArchived) setSelected(0)
+      }
+    }
+    if (input === 'X' && view === 'projects') {
+      setShowArchived(v => !v)
+      setSelected(0)
     }
     if (input === 'a' && VIEW_CONFIG[view].hasTasks) {
       const task = (view === 'project' ? projectTasks : tasks)[selected]
@@ -399,15 +413,16 @@ function App() {
             <Text dimColor>No projects.</Text>
           ) : projects.map((project, i) => {
             const isSelected = i === selected
+            const isArchived = project.isArchived === true
             const hasNext = projectStats.hasNext.has(project.id)
+            const color = isSelected ? 'blue' as const : !isArchived && !hasNext ? 'red' as const : undefined
             const count = projectStats.taskCount.get(project.id) ?? 0
             return (
-              <Box key={project.id}>
-                <Text {...(isSelected ? { color: 'blue' as const } : !hasNext ? { color: 'red' as const } : {})}>
-                  {isSelected ? '▶ ' : '  '}
-                  {project.name}<Text dimColor> {count}</Text>
-                </Text>
-              </Box>
+              <Row key={project.id} isSelected={isSelected} color={color} dimColor={isArchived && !isSelected}>
+                {project.name}
+                {isArchived ? <Meta>[archived]</Meta> : null}
+                <Meta>{count}</Meta>
+              </Row>
             )
           })
         ) : (
@@ -445,6 +460,8 @@ function App() {
           </Box>
         ) : view === 'project' ? (
           <Text dimColor>↑↓ navigate  q new  e edit  c complete  n next  a agenda  esc back</Text>
+        ) : view === 'projects' ? (
+          <Text dimColor>↑↓ navigate  v view  q new  e edit  x archive  X {showArchived ? 'hide' : 'show'} archived  ] sphere  k settings</Text>
         ) : (
           <Text dimColor>↑↓ navigate  v view  q new  e edit  c complete  a agenda  ] sphere  k settings</Text>
         )}

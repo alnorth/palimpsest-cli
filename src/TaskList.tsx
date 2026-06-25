@@ -1,7 +1,8 @@
 import React from 'react'
-import { Box, Text } from 'ink'
+import { Text } from 'ink'
 import { getProject, getAgenda } from 'palimpsest'
 import type { Task, ProjectionState } from 'palimpsest'
+import { Row, Meta } from './Row.js'
 
 interface Props {
   tasks: Task[]
@@ -21,15 +22,12 @@ export function TaskList({ tasks, selected, state, showProject = false, emptyMes
         const agenda = task.agendaId !== undefined ? getAgenda(state, task.agendaId) : undefined
         const isSelected = i === selected
         return (
-          <Box key={task.id}>
-            <Text {...(isSelected ? { color: 'blue' as const } : {})}>
-              {isSelected ? '▶ ' : '  '}
-              <Text color="yellow">{task.isNext === true ? '→' : ' '} </Text>{task.title}
-              {project !== undefined ? <Text dimColor> · {project.name}</Text> : null}
-              {agenda !== undefined ? <Text dimColor> · @{agenda.title}</Text> : null}
-              {task.dueDate !== undefined ? <Text dimColor> · due {task.dueDate}</Text> : null}
-            </Text>
-          </Box>
+          <Row key={task.id} isSelected={isSelected} color={isSelected ? 'blue' : undefined}>
+            <Text color="yellow">{task.isNext === true ? '→' : ' '} </Text>{task.title}
+            {project !== undefined ? <Meta>{project.name}</Meta> : null}
+            {agenda !== undefined ? <Meta>@{agenda.title}</Meta> : null}
+            {task.dueDate !== undefined ? <Meta>due {task.dueDate}</Meta> : null}
+          </Row>
         )
       })}
     </>
