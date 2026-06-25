@@ -36,9 +36,11 @@ interface NavState {
   selected: number
   activeProjectId: ProjectId | undefined
   activeTaskId: TaskId | undefined
+  showCompleted: boolean
+  showArchived: boolean
 }
 
-const INITIAL_NAV: NavState = { view: 'tasks', selected: 0, activeProjectId: undefined, activeTaskId: undefined }
+const INITIAL_NAV: NavState = { view: 'tasks', selected: 0, activeProjectId: undefined, activeTaskId: undefined, showCompleted: false, showArchived: false }
 
 interface Shortcut {
   key: string
@@ -57,12 +59,9 @@ function App() {
     () => (currentSphereId !== undefined ? state.spheres.get(currentSphereId) : undefined) ?? spheres[0],
     [state, currentSphereId, spheres],
   )
-  const [showCompleted, setShowCompleted] = useState(false)
-  const [showArchived, setShowArchived] = useState(false)
-
   const [navStack, setNavStack] = useState<NavState[]>([INITIAL_NAV])
   const currentNav = navStack[navStack.length - 1] ?? INITIAL_NAV
-  const { view, selected, activeProjectId, activeTaskId } = currentNav
+  const { view, selected, activeProjectId, activeTaskId, showCompleted, showArchived } = currentNav
 
   const tasks = useMemo(() => {
     if (activeSphere === undefined) return []
@@ -255,18 +254,18 @@ function App() {
       key: 'P', label: 'view project', row: 'view',
       when: currentTask?.projectId !== undefined,
       action: () => {
-        navigate({ view: 'project', selected: 0, activeProjectId: currentTask!.projectId!, activeTaskId: undefined })
+        navigate({ ...currentNav, view: 'project', selected: 0, activeProjectId: currentTask!.projectId!, activeTaskId: undefined })
       },
     },
     {
       key: 'C', label: showCompleted ? 'open' : 'completed', row: 'view',
       when: view === 'tasks' || view === 'project',
-      action: () => { setShowCompleted(v => !v); updateCurrent({ selected: 0 }) },
+      action: () => { navigate({ ...currentNav, showCompleted: !showCompleted, selected: 0 }) },
     },
     {
       key: 'X', label: showArchived ? 'active' : 'archived', row: 'view',
       when: view === 'projects',
-      action: () => { setShowArchived(v => !v); updateCurrent({ selected: 0 }) },
+      action: () => { navigate({ ...currentNav, showArchived: !showArchived, selected: 0 }) },
     },
     {
       key: ']', label: 'sphere', row: 'view',
@@ -299,7 +298,7 @@ function App() {
       const shortcutView = TOP_LEVEL_VIEWS.find(v => VIEW_CONFIG[v].key === input)
       if (shortcutView !== undefined || key.return) {
         const newView = shortcutView ?? TOP_LEVEL_VIEWS[viewPickerSelected]!
-        setNavStack([{ view: newView, selected: 0, activeProjectId: undefined, activeTaskId: undefined }])
+        setNavStack([{ ...INITIAL_NAV, view: newView }])
         setMode('list')
       }
       return
@@ -345,13 +344,13 @@ function App() {
     if (key.return && view === 'projects') {
       const project = projects[selected]
       if (project !== undefined) {
-        navigate({ view: 'project', selected: 0, activeProjectId: project.id, activeTaskId: undefined })
+        navigate({ ...currentNav, view: 'project', selected: 0, activeProjectId: project.id, activeTaskId: undefined })
       }
     }
     if (key.return && (view === 'tasks' || view === 'project')) {
       const task = (view === 'project' ? projectTasks : tasks)[selected]
       if (task !== undefined) {
-        navigate({ view: 'task', selected: 0, activeProjectId: currentNav.activeProjectId, activeTaskId: task.id })
+        navigate({ ...currentNav, view: 'task', selected: 0, activeTaskId: task.id })
       }
     }
     if (key.upArrow) updateCurrent(prev => ({ selected: Math.max(0, prev.selected - 1) }))
