@@ -5,7 +5,7 @@ import TextInput from 'ink-text-input'
 import {
   PalimpsestStore, CLEAR,
   listTasks, listProjects, listSpheres, listAgendas,
-  createTask, updateTask, createProject, updateProject, createSphere, createAgenda,
+  createTask, updateTask, completeTask, createProject, updateProject, createSphere, createAgenda,
 } from 'palimpsest'
 import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
 import { homedir } from 'node:os'
@@ -194,6 +194,19 @@ function App() {
         setMode('picking-agenda-for-task')
       }
     }
+    if (input === 'c' && VIEW_CONFIG[view].hasTasks) {
+      const task = (view === 'project' ? projectTasks : tasks)[selected]
+      if (task !== undefined) {
+        store.appendEvents(completeTask(state, task.id))
+        const newState = refreshState()
+        const newTasks = view === 'project' && activeProjectId !== undefined
+          ? listTasks(newState, { projectId: activeProjectId, status: 'open' })
+          : activeSphere !== undefined
+            ? listTasks(newState, { sphereId: activeSphere.id, status: 'open' })
+            : []
+        setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
+      }
+    }
     if (input === 'n' && view === 'project') {
       const task = projectTasks[selected]
       if (task !== undefined) {
@@ -212,6 +225,7 @@ function App() {
     if (input === ']') {
       const idx = spheres.findIndex(s => s.id === activeSphere?.id)
       setCurrentSphereId(spheres[(idx + 1) % spheres.length]?.id)
+      if (view === 'project') { setView('projects'); setSelected(0) }
     }
     if (key.upArrow) setSelected(i => Math.max(0, i - 1))
     if (key.downArrow) setSelected(i => Math.min(listLength - 1, i + 1))
@@ -430,9 +444,9 @@ function App() {
             <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
           </Box>
         ) : view === 'project' ? (
-          <Text dimColor>↑↓ navigate  q new  e edit  n next  a agenda  esc back</Text>
+          <Text dimColor>↑↓ navigate  q new  e edit  c complete  n next  a agenda  esc back</Text>
         ) : (
-          <Text dimColor>↑↓ navigate  v view  q new  e edit  a agenda  ] sphere  k settings</Text>
+          <Text dimColor>↑↓ navigate  v view  q new  e edit  c complete  a agenda  ] sphere  k settings</Text>
         )}
       </Box>
     </Box>
