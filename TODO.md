@@ -1,5 +1,6 @@
 # TODO
 
+- [ ] Abstract core app logic to be reusable across TUI, web, and phone
 - [ ] Due date picker
 - [ ] Project picker for tasks
 - [ ] Set due date expression on a task
