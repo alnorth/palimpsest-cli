@@ -29,6 +29,7 @@ export function TaskList({ tasks, selected, state, showProject = false, emptyMes
             color={isSelected ? 'blue' : undefined}
             title={<><Text color="yellow">{task.isNext === true ? '→' : ' '} </Text>{task.title}</>}
           >
+            {task.description ? <Meta>¶</Meta> : null}
             {project !== undefined ? <Meta>{project.name}</Meta> : null}
             {agenda !== undefined ? <Meta>@{agenda.title}</Meta> : null}
             {task.dueDate !== undefined ? <Meta>due {task.dueDate}</Meta> : null}
