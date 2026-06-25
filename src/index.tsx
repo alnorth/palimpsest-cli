@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react'
-import { render, Box, Text, useInput, useApp } from 'ink'
+import React, { useState, useMemo, useEffect } from 'react'
+import { render, Box, Text, useInput, useApp, useStdout } from 'ink'
 import { TaskList } from './TaskList.js'
 import { Row, Meta } from './Row.js'
 import TextInput from 'ink-text-input'
@@ -80,6 +80,17 @@ function App() {
   const [mode, setMode] = useState<Mode>('list')
   const [formValue, setFormValue] = useState('')
   const { exit } = useApp()
+  const { stdout } = useStdout()
+  const [termRows, setTermRows] = useState(stdout.rows ?? 24)
+
+  useEffect(() => {
+    const onResize = () => { setTermRows(stdout.rows ?? 24) }
+    stdout.on('resize', onResize)
+    return () => {
+      process.stdout.write('\x1b[?1049l\x1b[?25h')
+      stdout.off('resize', onResize)
+    }
+  }, [stdout])
 
   const listLength = view === 'tasks' ? tasks.length : view === 'projects' ? projects.length : projectTasks.length
 
@@ -315,55 +326,37 @@ function App() {
     setMode('settings')
   }
 
+  let title: React.ReactNode
+  let content: React.ReactNode
+  let footer: React.ReactNode
+
   if (mode === 'picking-agenda-for-task') {
     const task = (view === 'project' ? projectTasks : tasks)[selected]
     const options = ['No agenda', ...agendas.map(a => a.title)]
-    return (
-      <Box flexDirection="column" paddingY={1}>
-        <Text bold color="cyan">Agenda{task !== undefined ? ` — ${task.title}` : ''}</Text>
-        <Box marginTop={1} flexDirection="column">
-          {options.map((label, i) => (
-            <Text key={label} {...(i === agendaPickerSelected ? { color: 'blue' as const } : {})}>
-              {i === agendaPickerSelected ? '▶ ' : '  '}{i > 0 ? '@' : ''}{label}
-            </Text>
-          ))}
-        </Box>
-        <Box marginTop={1}>
-          <Text dimColor>↑↓ navigate  enter select  esc back</Text>
-        </Box>
-      </Box>
-    )
-  }
-
-  if (mode === 'picking-view') {
-    return (
-      <Box flexDirection="column" paddingY={1}>
-        <Text bold color="cyan">View</Text>
-        <Box marginTop={1} flexDirection="column">
-          {TOP_LEVEL_VIEWS.map((v, i) => (
-            <Text key={v} {...(i === viewPickerSelected ? { color: 'blue' as const } : {})}>
-              {i === viewPickerSelected ? '▶ ' : '  '}{VIEW_CONFIG[v].label}<Text dimColor>  {VIEW_CONFIG[v].key}</Text>
-            </Text>
-          ))}
-        </Box>
-        <Box marginTop={1}>
-          <Text dimColor>↑↓ navigate  enter select  esc back</Text>
-        </Box>
-      </Box>
-    )
-  }
-
-  if (mode === 'settings' || mode === 'creating-sphere' || mode === 'picking-sphere-for-agenda' || mode === 'creating-agenda') {
-    return (
-      <Box flexDirection="column" paddingY={1}>
-        <Text bold color="cyan">Settings</Text>
-        <Box marginTop={1} flexDirection="column">
-          {SETTINGS_OPTIONS.map((option, i) => (
-            <Text key={option} {...(i === settingsSelected ? { color: 'blue' as const } : {})}>
-              {i === settingsSelected ? '▶ ' : '  '}{option}
-            </Text>
-          ))}
-        </Box>
+    title = <Text bold color="cyan">Agenda{task !== undefined ? ` — ${task.title}` : ''}</Text>
+    content = options.map((label, i) => (
+      <Text key={label} {...(i === agendaPickerSelected ? { color: 'blue' as const } : {})}>
+        {i === agendaPickerSelected ? '> ' : '  '}{i > 0 ? '@' : ''}{label}
+      </Text>
+    ))
+    footer = <Text dimColor>↑↓ navigate  enter select  esc back</Text>
+  } else if (mode === 'picking-view') {
+    title = <Text bold color="cyan">View</Text>
+    content = TOP_LEVEL_VIEWS.map((v, i) => (
+      <Text key={v} {...(i === viewPickerSelected ? { color: 'blue' as const } : {})}>
+        {i === viewPickerSelected ? '> ' : '  '}{VIEW_CONFIG[v].label}<Text dimColor>  {VIEW_CONFIG[v].key}</Text>
+      </Text>
+    ))
+    footer = <Text dimColor>↑↓ navigate  enter select  esc back</Text>
+  } else if (mode === 'settings' || mode === 'creating-sphere' || mode === 'picking-sphere-for-agenda' || mode === 'creating-agenda') {
+    title = <Text bold color="cyan">Settings</Text>
+    content = (
+      <>
+        {SETTINGS_OPTIONS.map((option, i) => (
+          <Text key={option} {...(i === settingsSelected ? { color: 'blue' as const } : {})}>
+            {i === settingsSelected ? '> ' : '  '}{option}
+          </Text>
+        ))}
         <Box marginTop={1} flexDirection="column">
           {mode === 'creating-sphere' ? (
             <Box>
@@ -378,7 +371,7 @@ function App() {
                 <Text dimColor>Select a sphere:</Text>
                 {spheres.map((sphere, i) => (
                   <Text key={sphere.id} {...(i === pickerSelected ? { color: 'blue' as const } : {})}>
-                    {i === pickerSelected ? '▶ ' : '  '}{sphere.name}
+                    {i === pickerSelected ? '> ' : '  '}{sphere.name}
                   </Text>
                 ))}
               </>
@@ -388,85 +381,85 @@ function App() {
               <Text>Agenda title: </Text>
               <TextInput value={formValue} onChange={setFormValue} onSubmit={handleAgendaSubmit} />
             </Box>
-          ) : (
-            <Text dimColor>↑↓ navigate  enter select  esc back</Text>
-          )}
+          ) : null}
         </Box>
+      </>
+    )
+    footer = <Text dimColor>↑↓ navigate  enter select  esc back</Text>
+  } else {
+    title = view === 'project'
+      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text></>
+      : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text></>
+    content = activeSphere === undefined ? (
+      <Text dimColor>No spheres yet — press s to open settings and create one.</Text>
+    ) : view === 'tasks' ? (
+      <TaskList tasks={tasks} selected={selected} state={state} showProject emptyMessage="No open tasks in this sphere." />
+    ) : view === 'projects' ? (
+      projects.length === 0 ? (
+        <Text dimColor>No projects.</Text>
+      ) : projects.map((project, i) => {
+        const isSelected = i === selected
+        const isArchived = project.isArchived === true
+        const hasNext = projectStats.hasNext.has(project.id)
+        const color = isSelected ? 'blue' as const : !isArchived && !hasNext ? 'red' as const : undefined
+        const count = projectStats.taskCount.get(project.id) ?? 0
+        return (
+          <Row key={project.id} isSelected={isSelected} color={color} dimColor={isArchived && !isSelected} title={project.name}>
+            {isArchived ? <Meta>[archived]</Meta> : null}
+            <Meta>{count}</Meta>
+          </Row>
+        )
+      })
+    ) : (
+      <TaskList tasks={projectTasks} selected={selected} state={state} emptyMessage="No open tasks in this project." />
+    )
+    footer = mode === 'adding' ? (
+      activeSphere === undefined ? (
+        <Text color="red">No spheres found — create a sphere first.</Text>
+      ) : (
+        <Box>
+          <Text>New task: </Text>
+          <TextInput value={formValue} onChange={setFormValue} onSubmit={handleTaskSubmit} />
+        </Box>
+      )
+    ) : mode === 'editing-task' ? (
+      <Box>
+        <Text>Edit task: </Text>
+        <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditSubmit} />
       </Box>
+    ) : mode === 'adding-project' ? (
+      activeSphere === undefined ? (
+        <Text color="red">No spheres found — create a sphere first.</Text>
+      ) : (
+        <Box>
+          <Text>New project: </Text>
+          <TextInput value={formValue} onChange={setFormValue} onSubmit={handleProjectSubmit} />
+        </Box>
+      )
+    ) : mode === 'editing-project' ? (
+      <Box>
+        <Text>Edit project: </Text>
+        <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
+      </Box>
+    ) : view === 'project' ? (
+      <Text dimColor>↑↓ navigate  q new  e edit  c complete  n next  a agenda  esc back</Text>
+    ) : view === 'projects' ? (
+      <Text dimColor>↑↓ navigate  v view  q new  e edit  x archive  X {showArchived ? 'hide' : 'show'} archived  ] sphere  k settings</Text>
+    ) : (
+      <Text dimColor>↑↓ navigate  v view  q new  e edit  c complete  a agenda  ] sphere  k settings</Text>
     )
   }
 
-  const header = view === 'project'
-    ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text></>
-    : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text></>
-
   return (
-    <Box flexDirection="column" paddingY={1}>
-      <Box>{header}</Box>
-      <Box marginTop={1} flexDirection="column">
-        {activeSphere === undefined ? (
-          <Text dimColor>No spheres yet — press s to open settings and create one.</Text>
-        ) : view === 'tasks' ? (
-          <TaskList tasks={tasks} selected={selected} state={state} showProject emptyMessage="No open tasks in this sphere." />
-        ) : view === 'projects' ? (
-          projects.length === 0 ? (
-            <Text dimColor>No projects.</Text>
-          ) : projects.map((project, i) => {
-            const isSelected = i === selected
-            const isArchived = project.isArchived === true
-            const hasNext = projectStats.hasNext.has(project.id)
-            const color = isSelected ? 'blue' as const : !isArchived && !hasNext ? 'red' as const : undefined
-            const count = projectStats.taskCount.get(project.id) ?? 0
-            return (
-              <Row key={project.id} isSelected={isSelected} color={color} dimColor={isArchived && !isSelected} title={project.name}>
-                {isArchived ? <Meta>[archived]</Meta> : null}
-                <Meta>{count}</Meta>
-              </Row>
-            )
-          })
-        ) : (
-          <TaskList tasks={projectTasks} selected={selected} state={state} emptyMessage="No open tasks in this project." />
-        )}
+    <Box flexDirection="column" height={termRows} paddingX={1}>
+      <Box paddingTop={1}>{title}</Box>
+      <Box flexGrow={1} flexDirection="column" paddingTop={1} overflow="hidden">
+        {content}
       </Box>
-      <Box marginTop={1}>
-        {mode === 'adding' ? (
-          activeSphere === undefined ? (
-            <Text color="red">No spheres found — create a sphere first.</Text>
-          ) : (
-            <Box>
-              <Text>New task: </Text>
-              <TextInput value={formValue} onChange={setFormValue} onSubmit={handleTaskSubmit} />
-            </Box>
-          )
-        ) : mode === 'editing-task' ? (
-          <Box>
-            <Text>Edit task: </Text>
-            <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditSubmit} />
-          </Box>
-        ) : mode === 'adding-project' ? (
-          activeSphere === undefined ? (
-            <Text color="red">No spheres found — create a sphere first.</Text>
-          ) : (
-            <Box>
-              <Text>New project: </Text>
-              <TextInput value={formValue} onChange={setFormValue} onSubmit={handleProjectSubmit} />
-            </Box>
-          )
-        ) : mode === 'editing-project' ? (
-          <Box>
-            <Text>Edit project: </Text>
-            <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
-          </Box>
-        ) : view === 'project' ? (
-          <Text dimColor>↑↓ navigate  q new  e edit  c complete  n next  a agenda  esc back</Text>
-        ) : view === 'projects' ? (
-          <Text dimColor>↑↓ navigate  v view  q new  e edit  x archive  X {showArchived ? 'hide' : 'show'} archived  ] sphere  k settings</Text>
-        ) : (
-          <Text dimColor>↑↓ navigate  v view  q new  e edit  c complete  a agenda  ] sphere  k settings</Text>
-        )}
-      </Box>
+      <Box paddingBottom={1}>{footer}</Box>
     </Box>
   )
 }
 
+process.stdout.write('\x1b[?1049h\x1b[?25l')
 render(<App />)
