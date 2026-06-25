@@ -1,15 +1,15 @@
-import React, { useState, useMemo } from 'react'
-import { render, Box, Text, useInput, useApp, useWindowSize } from 'ink'
+import React, { useState, useMemo, useEffect } from 'react'
+import { render, Box, Text, useInput, useWindowSize } from 'ink'
 import { TaskList } from './TaskList.js'
 import { Row, Meta } from './Row.js'
 import TextInput from 'ink-text-input'
 import {
   PalimpsestStore, CLEAR,
-  listTasks, listProjects, listSpheres, listAgendas,
+  listTasks, listProjects, listSpheres, listAgendas, getProject, getAgenda,
   createTask, updateTask, completeTask, uncompleteTask, createProject, updateProject, archiveProject, unarchiveProject, createSphere, createAgenda,
 } from 'palimpsest'
-import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
-import { formatDate } from './format.js'
+import type { ProjectionState, SphereId, ProjectId, TaskId } from 'palimpsest'
+import { formatDate, formatDateTime } from './format.js'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { mkdirSync } from 'node:fs'
@@ -18,17 +18,27 @@ const filePath = process.env['PALIMPSEST_FILE'] ?? join(homedir(), '.palimpsest'
 mkdirSync(dirname(filePath), { recursive: true })
 const store = new PalimpsestStore(filePath)
 
-type View = 'tasks' | 'projects' | 'project'
+type View = 'tasks' | 'projects' | 'project' | 'task'
 type Mode = 'list' | 'picking-view' | 'adding' | 'editing-task' | 'editing-description' | 'picking-agenda-for-task' | 'adding-project' | 'editing-project' | 'settings' | 'creating-sphere' | 'picking-sphere-for-agenda' | 'creating-agenda'
 
 const VIEW_CONFIG = {
-  tasks:    { label: 'Tasks',    key: 't', hasTasks: true  },
-  projects: { label: 'Projects', key: 'p', hasTasks: false },
-  project:  { label: 'Project',            hasTasks: true  },
-} satisfies Record<View, { label: string; key?: string; hasTasks: boolean }>
+  tasks:    { label: 'Tasks',    key: 't' },
+  projects: { label: 'Projects', key: 'p' },
+  project:  { label: 'Project'            },
+  task:     { label: 'Task'               },
+} satisfies Record<View, { label: string; key?: string }>
 
 const TOP_LEVEL_VIEWS = (['tasks', 'projects'] as const).filter(v => VIEW_CONFIG[v].key !== undefined)
 const SETTINGS_OPTIONS = ['Create Sphere', 'Create Agenda'] as const
+
+interface NavState {
+  view: View
+  selected: number
+  activeProjectId: ProjectId | undefined
+  activeTaskId: TaskId | undefined
+}
+
+const INITIAL_NAV: NavState = { view: 'tasks', selected: 0, activeProjectId: undefined, activeTaskId: undefined }
 
 interface Shortcut {
   key: string
@@ -48,13 +58,18 @@ function App() {
     [state, currentSphereId, spheres],
   )
   const [showCompleted, setShowCompleted] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+
+  const [navStack, setNavStack] = useState<NavState[]>([INITIAL_NAV])
+  const currentNav = navStack[navStack.length - 1] ?? INITIAL_NAV
+  const { view, selected, activeProjectId, activeTaskId } = currentNav
+
   const tasks = useMemo(() => {
     if (activeSphere === undefined) return []
     const result = listTasks(state, { sphereId: activeSphere.id, status: showCompleted ? 'completed' : 'open' })
     if (showCompleted) result.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
     return result
   }, [state, activeSphere, showCompleted])
-  const [showArchived, setShowArchived] = useState(false)
   const projects = useMemo(() => {
     if (activeSphere === undefined) return []
     const result = listProjects(state, { sphereId: activeSphere.id, isArchived: showArchived })
@@ -76,8 +91,6 @@ function App() {
     }
     return { hasNext, taskCount }
   }, [state])
-  const [view, setView] = useState<View>('tasks')
-  const [activeProjectId, setActiveProjectId] = useState<ProjectId | undefined>(undefined)
   const activeProject = useMemo(
     () => activeProjectId !== undefined ? state.projects.get(activeProjectId) : undefined,
     [state, activeProjectId],
@@ -88,7 +101,11 @@ function App() {
     if (showCompleted) result.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
     return result
   }, [state, activeProjectId, showCompleted])
-  const [selected, setSelected] = useState(0)
+  const activeTask = useMemo(
+    () => activeTaskId !== undefined ? state.tasks.get(activeTaskId) : undefined,
+    [state, activeTaskId],
+  )
+
   const [viewPickerSelected, setViewPickerSelected] = useState(0)
   const [agendaPickerSelected, setAgendaPickerSelected] = useState(0)
   const [settingsSelected, setSettingsSelected] = useState(0)
@@ -96,10 +113,18 @@ function App() {
   const [agendaSphereId, setAgendaSphereId] = useState<SphereId | undefined>(undefined)
   const [mode, setMode] = useState<Mode>('list')
   const [formValue, setFormValue] = useState('')
-  const { exit } = useApp()
   const { rows: termRows } = useWindowSize()
 
-  const listLength = view === 'tasks' ? tasks.length : view === 'projects' ? projects.length : projectTasks.length
+  useEffect(() => {
+    const suffix = view === 'task' ? `Task: ${activeTask?.title ?? ''}`
+      : view === 'project' ? `Project: ${activeProject?.name ?? ''}`
+      : VIEW_CONFIG[view].label
+    process.stdout.write(`\x1b]0;Palimpsest — ${suffix}\x07`)
+    return () => { process.stdout.write('\x1b]0;\x07') }
+  }, [view, activeTask, activeProject])
+
+  const listLength = view === 'tasks' ? tasks.length : view === 'projects' ? projects.length : view === 'project' ? projectTasks.length : 0
+  const currentTask = view === 'task' ? activeTask : view === 'project' ? projectTasks[selected] : view === 'tasks' ? tasks[selected] : undefined
 
   function refreshState() {
     const newState = store.getState()
@@ -110,6 +135,22 @@ function App() {
   function appendAndRefresh(events: ReturnType<typeof createTask>) {
     store.appendEvents(events)
     refreshState()
+  }
+
+  function updateCurrent(patch: Partial<NavState> | ((prev: NavState) => Partial<NavState>)) {
+    setNavStack(s => {
+      const last = s[s.length - 1] ?? INITIAL_NAV
+      const update = typeof patch === 'function' ? patch(last) : patch
+      return [...s.slice(0, -1), { ...last, ...update }]
+    })
+  }
+
+  function navigate(nextState: NavState) {
+    setNavStack(s => [...s, nextState])
+  }
+
+  function goBack() {
+    setNavStack(s => s.length > 1 ? s.slice(0, -1) : s)
   }
 
   function startCreateAgenda() {
@@ -127,7 +168,7 @@ function App() {
   const shortcuts: Shortcut[] = [
     {
       key: 'v', label: 'view', row: 'view',
-      show: view !== 'project',
+      show: view !== 'project' && view !== 'task',
       action: () => {
         const idx = view === 'project' ? TOP_LEVEL_VIEWS.indexOf('projects') : TOP_LEVEL_VIEWS.indexOf(view as 'tasks' | 'projects')
         setViewPickerSelected(Math.max(0, idx))
@@ -136,7 +177,7 @@ function App() {
     },
     {
       key: 'q', label: 'new', row: 'state',
-      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      when: view === 'tasks' || view === 'project',
       action: () => setMode('adding'),
     },
     {
@@ -146,19 +187,13 @@ function App() {
     },
     {
       key: 'e', label: 'edit', row: 'state',
-      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
-      action: () => {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
-        if (task !== undefined) { setFormValue(task.title); setMode('editing-task') }
-      },
+      when: currentTask?.status === 'open',
+      action: () => { setFormValue(currentTask!.title); setMode('editing-task') },
     },
     {
       key: 'd', label: 'description', row: 'state',
-      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
-      action: () => {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
-        if (task !== undefined) { setFormValue(task.description); setMode('editing-description') }
-      },
+      when: currentTask?.status === 'open',
+      action: () => { setFormValue(currentTask!.description); setMode('editing-description') },
     },
     {
       key: 'e', label: 'edit', row: 'state',
@@ -169,43 +204,36 @@ function App() {
       },
     },
     {
-      key: 'c', label: showCompleted ? 'reopen' : 'complete', row: 'state',
-      when: VIEW_CONFIG[view].hasTasks,
+      key: 'c', label: currentTask?.status === 'completed' ? 'reopen' : 'complete', row: 'state',
+      when: currentTask !== undefined,
       action: () => {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
-        if (task !== undefined) {
-          store.appendEvents(showCompleted ? uncompleteTask(state, task.id) : completeTask(state, task.id))
-          const newState = refreshState()
-          const status = showCompleted ? 'completed' : 'open'
+        store.appendEvents(showCompleted ? uncompleteTask(state, currentTask!.id) : completeTask(state, currentTask!.id))
+        const newState = refreshState()
+        const status = showCompleted ? 'completed' : 'open'
+        if (view !== 'task') {
           const newTasks = view === 'project' && activeProjectId !== undefined
             ? listTasks(newState, { projectId: activeProjectId, status })
             : activeSphere !== undefined
               ? listTasks(newState, { sphereId: activeSphere.id, status })
               : []
-          setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
+          updateCurrent(prev => ({ selected: Math.max(0, Math.min(prev.selected, newTasks.length - 1)) }))
         }
       },
     },
     {
       key: 'n', label: 'next', row: 'state',
-      when: view === 'project' && !showCompleted,
+      when: (view === 'project' || view === 'task') && currentTask?.status === 'open',
       action: () => {
-        const task = projectTasks[selected]
-        if (task !== undefined) {
-          appendAndRefresh(updateTask(state, { taskId: task.id, patch: { isNext: task.isNext !== true } }))
-        }
+        appendAndRefresh(updateTask(state, { taskId: currentTask!.id, patch: { isNext: currentTask!.isNext !== true } }))
       },
     },
     {
       key: 'a', label: 'agenda', row: 'state',
-      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      when: currentTask?.status === 'open',
       action: () => {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
-        if (task !== undefined) {
-          const currentIdx = task.agendaId !== undefined ? agendas.findIndex(a => a.id === task.agendaId) + 1 : 0
-          setAgendaPickerSelected(Math.max(0, currentIdx))
-          setMode('picking-agenda-for-task')
-        }
+        const idx = currentTask!.agendaId !== undefined ? agendas.findIndex(a => a.id === currentTask!.agendaId) + 1 : 0
+        setAgendaPickerSelected(Math.max(0, idx))
+        setMode('picking-agenda-for-task')
       },
     },
     {
@@ -219,32 +247,39 @@ function App() {
           const newProjects = activeSphere !== undefined
             ? listProjects(newState, { sphereId: activeSphere.id, isArchived: showArchived })
             : []
-          setSelected(i => Math.max(0, Math.min(i, newProjects.length - 1)))
+          updateCurrent(prev => ({ selected: Math.max(0, Math.min(prev.selected, newProjects.length - 1)) }))
         }
       },
     },
     {
+      key: 'P', label: 'view project', row: 'view',
+      when: currentTask?.projectId !== undefined,
+      action: () => {
+        navigate({ view: 'project', selected: 0, activeProjectId: currentTask!.projectId!, activeTaskId: undefined })
+      },
+    },
+    {
       key: 'C', label: showCompleted ? 'open' : 'completed', row: 'view',
-      when: VIEW_CONFIG[view].hasTasks,
-      action: () => { setShowCompleted(v => !v); setSelected(0) },
+      when: view === 'tasks' || view === 'project',
+      action: () => { setShowCompleted(v => !v); updateCurrent({ selected: 0 }) },
     },
     {
       key: 'X', label: showArchived ? 'active' : 'archived', row: 'view',
       when: view === 'projects',
-      action: () => { setShowArchived(v => !v); setSelected(0) },
+      action: () => { setShowArchived(v => !v); updateCurrent({ selected: 0 }) },
     },
     {
       key: ']', label: 'sphere', row: 'view',
-      show: view !== 'project',
+      show: view !== 'project' && view !== 'task',
       action: () => {
         const idx = spheres.findIndex(s => s.id === activeSphere?.id)
         setCurrentSphereId(spheres[(idx + 1) % spheres.length]?.id)
-        if (view === 'project') { setView('projects'); setSelected(0) }
+        setNavStack([INITIAL_NAV])
       },
     },
     {
       key: 'k', label: 'settings', row: 'view',
-      show: view !== 'project',
+      show: view !== 'project' && view !== 'task',
       action: () => setMode('settings'),
     },
   ]
@@ -263,9 +298,8 @@ function App() {
       if (key.downArrow) setViewPickerSelected(i => Math.min(TOP_LEVEL_VIEWS.length - 1, i + 1))
       const shortcutView = TOP_LEVEL_VIEWS.find(v => VIEW_CONFIG[v].key === input)
       if (shortcutView !== undefined || key.return) {
-        setView(shortcutView ?? TOP_LEVEL_VIEWS[viewPickerSelected]!)
-        setActiveProjectId(undefined)
-        setSelected(0)
+        const newView = shortcutView ?? TOP_LEVEL_VIEWS[viewPickerSelected]!
+        setNavStack([{ view: newView, selected: 0, activeProjectId: undefined, activeTaskId: undefined }])
         setMode('list')
       }
       return
@@ -275,7 +309,7 @@ function App() {
       if (key.upArrow) setAgendaPickerSelected(i => Math.max(0, i - 1))
       if (key.downArrow) setAgendaPickerSelected(i => Math.min(agendas.length, i + 1))
       if (key.return) {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
+        const task = currentTask
         if (task !== undefined) {
           const patch = agendaPickerSelected === 0
             ? { agendaId: CLEAR }
@@ -307,22 +341,21 @@ function App() {
       return
     }
     // list mode
-    if (key.escape) {
-      if (view === 'project') {
-        setView('projects')
-        setSelected(Math.max(0, projects.findIndex(p => p.id === activeProjectId)))
-      } else exit()
-    }
+    if (key.escape) goBack()
     if (key.return && view === 'projects') {
       const project = projects[selected]
       if (project !== undefined) {
-        setActiveProjectId(project.id)
-        setView('project')
-        setSelected(0)
+        navigate({ view: 'project', selected: 0, activeProjectId: project.id, activeTaskId: undefined })
       }
     }
-    if (key.upArrow) setSelected(i => Math.max(0, i - 1))
-    if (key.downArrow) setSelected(i => Math.min(listLength - 1, i + 1))
+    if (key.return && (view === 'tasks' || view === 'project')) {
+      const task = (view === 'project' ? projectTasks : tasks)[selected]
+      if (task !== undefined) {
+        navigate({ view: 'task', selected: 0, activeProjectId: currentNav.activeProjectId, activeTaskId: task.id })
+      }
+    }
+    if (key.upArrow) updateCurrent(prev => ({ selected: Math.max(0, prev.selected - 1) }))
+    if (key.downArrow) updateCurrent(prev => ({ selected: Math.min(listLength - 1, prev.selected + 1) }))
     shortcuts.find(s => s.key === input && (s.when ?? true))?.action()
   })
 
@@ -332,11 +365,11 @@ function App() {
       if (view === 'project' && activeProjectId !== undefined) {
         store.appendEvents(createTask(state, { title: trimmed, projectId: activeProjectId }))
         const newState = refreshState()
-        setSelected(listTasks(newState, { projectId: activeProjectId, status: 'open' }).length - 1)
+        updateCurrent({ selected: listTasks(newState, { projectId: activeProjectId, status: 'open' }).length - 1 })
       } else if (activeSphere !== undefined) {
         store.appendEvents(createTask(state, { title: trimmed, sphereId: activeSphere.id }))
         const newState = refreshState()
-        setSelected(listTasks(newState, { sphereId: activeSphere.id, status: 'open' }).length - 1)
+        updateCurrent({ selected: listTasks(newState, { sphereId: activeSphere.id, status: 'open' }).length - 1 })
       }
     }
     setFormValue('')
@@ -345,7 +378,7 @@ function App() {
 
   function handleEditSubmit(title: string) {
     const trimmed = title.trim()
-    const task = (view === 'project' ? projectTasks : tasks)[selected]
+    const task = currentTask
     if (trimmed && task !== undefined) {
       appendAndRefresh(updateTask(state, { taskId: task.id, patch: { title: trimmed } }))
     }
@@ -354,7 +387,7 @@ function App() {
   }
 
   function handleEditDescriptionSubmit(description: string) {
-    const task = (view === 'project' ? projectTasks : tasks)[selected]
+    const task = currentTask
     if (task !== undefined) {
       appendAndRefresh(updateTask(state, { taskId: task.id, patch: { description: description.trim() } }))
     }
@@ -410,7 +443,7 @@ function App() {
   let footer: React.ReactNode
 
   if (mode === 'picking-agenda-for-task') {
-    const task = (view === 'project' ? projectTasks : tasks)[selected]
+    const task = currentTask
     const options = ['No agenda', ...agendas.map(a => a.title)]
     title = <Text bold color="cyan">Agenda{task !== undefined ? ` — ${task.title}` : ''}</Text>
     content = options.map((label, i) => (
@@ -466,24 +499,44 @@ function App() {
     )
     footer = <Text dimColor>↑↓ navigate  enter select  esc back</Text>
   } else {
-    const completedTag = showCompleted && VIEW_CONFIG[view].hasTasks ? <Text color="yellow"> completed</Text> : null
+    const completedTag = showCompleted && view !== 'projects' ? <Text color="yellow"> completed</Text> : null
     const archivedTag = showArchived && view === 'projects' ? <Text color="yellow"> archived</Text> : null
     const visible = (s: Shortcut) => s.show ?? s.when ?? true
     const stateRow = shortcuts.filter(s => s.row === 'state' && visible(s)).map(s => `${s.key} ${s.label}`)
     const viewRow = ['↑↓ navigate', ...shortcuts.filter(s => s.row === 'view' && visible(s)).map(s => `${s.key} ${s.label}`)]
-    if (view === 'project') viewRow.push('esc back')
+    if (navStack.length > 1) viewRow.push('esc back')
     const listHint = (
       <Box flexDirection="column">
         {stateRow.length > 0 && <Text dimColor>{stateRow.join('  ')}</Text>}
         <Text dimColor>{viewRow.join('  ')}</Text>
       </Box>
     )
-    title = view === 'project'
-      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text>{completedTag}</>
+    title = view === 'task'
+      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — Task: {activeTask?.title ?? ''}</Text>{completedTag}</>
+      : view === 'project'
+      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — Project: {activeProject?.name ?? ''}</Text>{completedTag}</>
       : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text>{archivedTag}{completedTag}</>
     content = activeSphere === undefined ? (
       <Text dimColor>No spheres yet — press s to open settings and create one.</Text>
-    ) : view === 'tasks' ? (
+    ) : view === 'task' ? (() => {
+      const detailProject = activeTask?.projectId !== undefined ? getProject(state, activeTask.projectId) : undefined
+      const detailAgenda = activeTask?.agendaId !== undefined ? getAgenda(state, activeTask.agendaId) : undefined
+      return (
+        <Box flexDirection="column">
+          {activeTask?.description
+            ? <Text>{activeTask.description}</Text>
+            : <Text dimColor>No description.</Text>
+          }
+          <Box flexDirection="column" marginTop={1}>
+            {detailProject !== undefined ? <Text dimColor>project    {detailProject.name}</Text> : null}
+            {detailAgenda !== undefined ? <Text dimColor>agenda     @{detailAgenda.title}</Text> : null}
+            {activeTask?.dueDate !== undefined ? <Text dimColor>due        {activeTask.dueDate}</Text> : null}
+            {activeTask?.completedAt !== undefined ? <Text dimColor>completed  {formatDateTime(activeTask.completedAt)}</Text> : null}
+            {activeTask?.isNext === true ? <Text dimColor>next action</Text> : null}
+          </Box>
+        </Box>
+      )
+    })() : view === 'tasks' ? (
       <TaskList tasks={tasks} selected={selected} state={state} showProject emptyMessage={showCompleted ? 'No completed tasks in this sphere.' : 'No open tasks in this sphere.'} />
     ) : view === 'projects' ? (
       projects.length === 0 ? (
