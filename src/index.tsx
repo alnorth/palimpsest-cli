@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react'
 import { render, Box, Text, useInput, useApp } from 'ink'
+import { TaskList } from './TaskList.js'
 import TextInput from 'ink-text-input'
 import {
   PalimpsestStore,
-  listTasks, listProjects, listSpheres, getProject,
+  listTasks, listProjects, listSpheres,
   createTask, updateTask, createProject, updateProject, createSphere, createAgenda,
 } from 'palimpsest'
 import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
@@ -155,7 +156,7 @@ function App() {
         setSelected(0)
       }
     }
-    if (input === 's') setMode('settings')
+    if (input === 'k') setMode('settings')
     if (input === ']') {
       const idx = spheres.findIndex(s => s.id === activeSphere?.id)
       setCurrentSphereId(spheres[(idx + 1) % spheres.length]?.id)
@@ -302,22 +303,7 @@ function App() {
         {activeSphere === undefined ? (
           <Text dimColor>No spheres yet — press s to open settings and create one.</Text>
         ) : view === 'tasks' ? (
-          tasks.length === 0 ? (
-            <Text dimColor>No open tasks.</Text>
-          ) : tasks.map((task, i) => {
-            const project = task.projectId !== undefined ? getProject(state, task.projectId) : undefined
-            const isSelected = i === selected
-            return (
-              <Box key={task.id}>
-                <Text {...(isSelected ? { color: 'blue' as const } : {})}>
-                  {isSelected ? '▶ ' : '  '}
-                  {task.title}
-                  {project !== undefined ? <Text dimColor> · {project.name}</Text> : null}
-                  {task.dueDate !== undefined ? <Text dimColor> · due {task.dueDate}</Text> : null}
-                </Text>
-              </Box>
-            )
-          })
+          <TaskList tasks={tasks} selected={selected} state={state} showProject />
         ) : view === 'projects' ? (
           projects.length === 0 ? (
             <Text dimColor>No projects.</Text>
@@ -333,20 +319,7 @@ function App() {
             )
           })
         ) : (
-          projectTasks.length === 0 ? (
-            <Text dimColor>No open tasks.</Text>
-          ) : projectTasks.map((task, i) => {
-            const isSelected = i === selected
-            return (
-              <Box key={task.id}>
-                <Text {...(isSelected ? { color: 'blue' as const } : {})}>
-                  {isSelected ? '▶ ' : '  '}
-                  {task.title}
-                  {task.dueDate !== undefined ? <Text dimColor> · due {task.dueDate}</Text> : null}
-                </Text>
-              </Box>
-            )
-          })
+          <TaskList tasks={projectTasks} selected={selected} state={state} />
         )}
       </Box>
       <Box marginTop={1}>
@@ -381,7 +354,7 @@ function App() {
         ) : view === 'project' ? (
           <Text dimColor>↑↓ navigate  q new  e edit  esc back</Text>
         ) : (
-          <Text dimColor>↑↓ navigate  v view  q new  e edit  ] sphere  s settings</Text>
+          <Text dimColor>↑↓ navigate  v view  q new  e edit  ] sphere  k settings</Text>
         )}
       </Box>
     </Box>
