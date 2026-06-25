@@ -6,7 +6,7 @@ import TextInput from 'ink-text-input'
 import {
   PalimpsestStore, CLEAR,
   listTasks, listProjects, listSpheres, listAgendas,
-  createTask, updateTask, completeTask, createProject, updateProject, archiveProject, unarchiveProject, createSphere, createAgenda,
+  createTask, updateTask, completeTask, uncompleteTask, createProject, updateProject, archiveProject, unarchiveProject, createSphere, createAgenda,
 } from 'palimpsest'
 import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
 import { formatDate } from './format.js'
@@ -224,15 +224,16 @@ function App() {
       setShowCompleted(v => !v)
       setSelected(0)
     }
-    if (input === 'c' && VIEW_CONFIG[view].hasTasks && !showCompleted) {
+    if (input === 'c' && VIEW_CONFIG[view].hasTasks) {
       const task = (view === 'project' ? projectTasks : tasks)[selected]
       if (task !== undefined) {
-        store.appendEvents(completeTask(state, task.id))
+        store.appendEvents(showCompleted ? uncompleteTask(state, task.id) : completeTask(state, task.id))
         const newState = refreshState()
+        const status = showCompleted ? 'completed' : 'open'
         const newTasks = view === 'project' && activeProjectId !== undefined
-          ? listTasks(newState, { projectId: activeProjectId, status: 'open' })
+          ? listTasks(newState, { projectId: activeProjectId, status })
           : activeSphere !== undefined
-            ? listTasks(newState, { sphereId: activeSphere.id, status: 'open' })
+            ? listTasks(newState, { sphereId: activeSphere.id, status })
             : []
         setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
       }
@@ -448,11 +449,11 @@ function App() {
         <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
       </Box>
     ) : view === 'project' ? (
-      <Text dimColor>↑↓ navigate  {showCompleted ? '' : 'q new  e edit  c complete  n next  a agenda  '}C {showCompleted ? 'open' : 'completed'}  esc back</Text>
+      <Text dimColor>↑↓ navigate  {showCompleted ? 'c reopen  ' : 'q new  e edit  c complete  n next  a agenda  '}C {showCompleted ? 'open' : 'completed'}  esc back</Text>
     ) : view === 'projects' ? (
       <Text dimColor>↑↓ navigate  v view  {showArchived ? 'x unarchive  X active' : 'q new  e edit  x archive  X archived'}  ] sphere  k settings</Text>
     ) : (
-      <Text dimColor>↑↓ navigate  v view  {showCompleted ? '' : 'q new  e edit  c complete  a agenda  '}C {showCompleted ? 'open' : 'completed'}  ] sphere  k settings</Text>
+      <Text dimColor>↑↓ navigate  v view  {showCompleted ? 'c reopen  ' : 'q new  e edit  c complete  a agenda  '}C {showCompleted ? 'open' : 'completed'}  ] sphere  k settings</Text>
     )
   }
 

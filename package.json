@@ -13,7 +13,7 @@
   "dependencies": {
     "ink": "^7.1.0",
     "ink-text-input": "^6.0.0",
-    "palimpsest": "github:alnorth/palimpsest#v0.1.3",
+    "palimpsest": "github:alnorth/palimpsest#v0.1.4",
     "react": "^19.2.7"
   },
   "devDependencies": {
