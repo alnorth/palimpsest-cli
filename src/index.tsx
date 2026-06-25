@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react'
-import { render, Box, Text, useInput, useApp, useStdout } from 'ink'
+import React, { useState, useMemo } from 'react'
+import { render, Box, Text, useInput, useApp, useWindowSize } from 'ink'
 import { TaskList } from './TaskList.js'
 import { Row, Meta } from './Row.js'
 import TextInput from 'ink-text-input'
@@ -9,6 +9,7 @@ import {
   createTask, updateTask, completeTask, createProject, updateProject, archiveProject, unarchiveProject, createSphere, createAgenda,
 } from 'palimpsest'
 import type { ProjectionState, SphereId, ProjectId } from 'palimpsest'
+import { formatDate } from './format.js'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { mkdirSync } from 'node:fs'
@@ -37,15 +38,20 @@ function App() {
     () => (currentSphereId !== undefined ? state.spheres.get(currentSphereId) : undefined) ?? spheres[0],
     [state, currentSphereId, spheres],
   )
-  const tasks = useMemo(
-    () => activeSphere !== undefined ? listTasks(state, { sphereId: activeSphere.id, status: 'open' }) : [],
-    [state, activeSphere],
-  )
+  const [showCompleted, setShowCompleted] = useState(false)
+  const tasks = useMemo(() => {
+    if (activeSphere === undefined) return []
+    const result = listTasks(state, { sphereId: activeSphere.id, status: showCompleted ? 'completed' : 'open' })
+    if (showCompleted) result.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+    return result
+  }, [state, activeSphere, showCompleted])
   const [showArchived, setShowArchived] = useState(false)
-  const projects = useMemo(
-    () => activeSphere !== undefined ? listProjects(state, { sphereId: activeSphere.id, ...(showArchived ? {} : { isArchived: false }) }) : [],
-    [state, activeSphere, showArchived],
-  )
+  const projects = useMemo(() => {
+    if (activeSphere === undefined) return []
+    const result = listProjects(state, { sphereId: activeSphere.id, isArchived: showArchived })
+    if (showArchived) result.sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''))
+    return result
+  }, [state, activeSphere, showArchived])
   const agendas = useMemo(
     () => activeSphere !== undefined ? listAgendas(state, { sphereId: activeSphere.id }) : [],
     [state, activeSphere],
@@ -67,10 +73,12 @@ function App() {
     () => activeProjectId !== undefined ? state.projects.get(activeProjectId) : undefined,
     [state, activeProjectId],
   )
-  const projectTasks = useMemo(
-    () => activeProjectId !== undefined ? listTasks(state, { projectId: activeProjectId, status: 'open' }) : [],
-    [state, activeProjectId],
-  )
+  const projectTasks = useMemo(() => {
+    if (activeProjectId === undefined) return []
+    const result = listTasks(state, { projectId: activeProjectId, status: showCompleted ? 'completed' : 'open' })
+    if (showCompleted) result.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))
+    return result
+  }, [state, activeProjectId, showCompleted])
   const [selected, setSelected] = useState(0)
   const [viewPickerSelected, setViewPickerSelected] = useState(0)
   const [agendaPickerSelected, setAgendaPickerSelected] = useState(0)
@@ -80,17 +88,7 @@ function App() {
   const [mode, setMode] = useState<Mode>('list')
   const [formValue, setFormValue] = useState('')
   const { exit } = useApp()
-  const { stdout } = useStdout()
-  const [termRows, setTermRows] = useState(stdout.rows ?? 24)
-
-  useEffect(() => {
-    const onResize = () => { setTermRows(stdout.rows ?? 24) }
-    stdout.on('resize', onResize)
-    return () => {
-      process.stdout.write('\x1b[?1049l\x1b[?25h')
-      stdout.off('resize', onResize)
-    }
-  }, [stdout])
+  const { rows: termRows } = useWindowSize()
 
   const listLength = view === 'tasks' ? tasks.length : view === 'projects' ? projects.length : projectTasks.length
 
@@ -186,9 +184,9 @@ function App() {
       setViewPickerSelected(Math.max(0, idx))
       setMode('picking-view')
     }
-    if (input === 'q') {
-      if (view === 'projects') setMode('adding-project')
-      else setMode('adding')
+    if (input === 'q' && !showCompleted) {
+      if (view === 'projects' && !showArchived) setMode('adding-project')
+      else if (view !== 'projects') setMode('adding')
     }
     if (input === 'e') {
       if (view === 'projects') {
@@ -203,8 +201,11 @@ function App() {
       const project = projects[selected]
       if (project !== undefined) {
         store.appendEvents(project.isArchived ? unarchiveProject(state, project.id) : archiveProject(state, project.id))
-        refreshState()
-        if (!showArchived) setSelected(0)
+        const newState = refreshState()
+        const newProjects = activeSphere !== undefined
+          ? listProjects(newState, { sphereId: activeSphere.id, isArchived: showArchived })
+          : []
+        setSelected(i => Math.max(0, Math.min(i, newProjects.length - 1)))
       }
     }
     if (input === 'X' && view === 'projects') {
@@ -219,7 +220,11 @@ function App() {
         setMode('picking-agenda-for-task')
       }
     }
-    if (input === 'c' && VIEW_CONFIG[view].hasTasks) {
+    if (input === 'C' && VIEW_CONFIG[view].hasTasks) {
+      setShowCompleted(v => !v)
+      setSelected(0)
+    }
+    if (input === 'c' && VIEW_CONFIG[view].hasTasks && !showCompleted) {
       const task = (view === 'project' ? projectTasks : tasks)[selected]
       if (task !== undefined) {
         store.appendEvents(completeTask(state, task.id))
@@ -232,7 +237,7 @@ function App() {
         setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
       }
     }
-    if (input === 'n' && view === 'project') {
+    if (input === 'n' && view === 'project' && !showCompleted) {
       const task = projectTasks[selected]
       if (task !== undefined) {
         appendAndRefresh(updateTask(state, { taskId: task.id, patch: { isNext: task.isNext !== true } }))
@@ -387,31 +392,32 @@ function App() {
     )
     footer = <Text dimColor>↑↓ navigate  enter select  esc back</Text>
   } else {
+    const completedTag = showCompleted && VIEW_CONFIG[view].hasTasks ? <Text color="yellow"> completed</Text> : null
+    const archivedTag = showArchived && view === 'projects' ? <Text color="yellow"> archived</Text> : null
     title = view === 'project'
-      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text></>
-      : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text></>
+      ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text>{completedTag}</>
+      : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text>{archivedTag}{completedTag}</>
     content = activeSphere === undefined ? (
       <Text dimColor>No spheres yet — press s to open settings and create one.</Text>
     ) : view === 'tasks' ? (
-      <TaskList tasks={tasks} selected={selected} state={state} showProject emptyMessage="No open tasks in this sphere." />
+      <TaskList tasks={tasks} selected={selected} state={state} showProject emptyMessage={showCompleted ? 'No completed tasks in this sphere.' : 'No open tasks in this sphere.'} />
     ) : view === 'projects' ? (
       projects.length === 0 ? (
         <Text dimColor>No projects.</Text>
       ) : projects.map((project, i) => {
         const isSelected = i === selected
-        const isArchived = project.isArchived === true
         const hasNext = projectStats.hasNext.has(project.id)
-        const color = isSelected ? 'blue' as const : !isArchived && !hasNext ? 'red' as const : undefined
+        const color = isSelected ? 'blue' as const : !showArchived && !hasNext ? 'red' as const : undefined
         const count = projectStats.taskCount.get(project.id) ?? 0
         return (
-          <Row key={project.id} isSelected={isSelected} color={color} dimColor={isArchived && !isSelected} title={project.name}>
-            {isArchived ? <Meta>[archived]</Meta> : null}
+          <Row key={project.id} isSelected={isSelected} color={color} title={project.name}>
+            {project.archivedAt !== undefined ? <Meta>{formatDate(project.archivedAt)}</Meta> : null}
             <Meta>{count}</Meta>
           </Row>
         )
       })
     ) : (
-      <TaskList tasks={projectTasks} selected={selected} state={state} emptyMessage="No open tasks in this project." />
+      <TaskList tasks={projectTasks} selected={selected} state={state} emptyMessage={showCompleted ? 'No completed tasks in this project.' : 'No open tasks in this project.'} />
     )
     footer = mode === 'adding' ? (
       activeSphere === undefined ? (
@@ -442,11 +448,11 @@ function App() {
         <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
       </Box>
     ) : view === 'project' ? (
-      <Text dimColor>↑↓ navigate  q new  e edit  c complete  n next  a agenda  esc back</Text>
+      <Text dimColor>↑↓ navigate  {showCompleted ? '' : 'q new  e edit  c complete  n next  a agenda  '}C {showCompleted ? 'open' : 'completed'}  esc back</Text>
     ) : view === 'projects' ? (
-      <Text dimColor>↑↓ navigate  v view  q new  e edit  x archive  X {showArchived ? 'hide' : 'show'} archived  ] sphere  k settings</Text>
+      <Text dimColor>↑↓ navigate  v view  {showArchived ? 'x unarchive  X active' : 'q new  e edit  x archive  X archived'}  ] sphere  k settings</Text>
     ) : (
-      <Text dimColor>↑↓ navigate  v view  q new  e edit  c complete  a agenda  ] sphere  k settings</Text>
+      <Text dimColor>↑↓ navigate  v view  {showCompleted ? '' : 'q new  e edit  c complete  a agenda  '}C {showCompleted ? 'open' : 'completed'}  ] sphere  k settings</Text>
     )
   }
 
@@ -461,5 +467,4 @@ function App() {
   )
 }
 
-process.stdout.write('\x1b[?1049h\x1b[?25l')
-render(<App />)
+render(<App />, { alternateScreen: true })

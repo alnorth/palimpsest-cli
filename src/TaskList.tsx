@@ -3,6 +3,7 @@ import { Text } from 'ink'
 import { getProject, getAgenda } from 'palimpsest'
 import type { Task, ProjectionState } from 'palimpsest'
 import { Row, Meta } from './Row.js'
+import { formatDateTime } from './format.js'
 
 interface Props {
   tasks: Task[]
@@ -31,6 +32,7 @@ export function TaskList({ tasks, selected, state, showProject = false, emptyMes
             {project !== undefined ? <Meta>{project.name}</Meta> : null}
             {agenda !== undefined ? <Meta>@{agenda.title}</Meta> : null}
             {task.dueDate !== undefined ? <Meta>due {task.dueDate}</Meta> : null}
+            {task.completedAt !== undefined ? <Meta>{formatDateTime(task.completedAt)}</Meta> : null}
           </Row>
         )
       })}
