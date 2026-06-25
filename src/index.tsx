@@ -19,7 +19,7 @@ mkdirSync(dirname(filePath), { recursive: true })
 const store = new PalimpsestStore(filePath)
 
 type View = 'tasks' | 'projects' | 'project'
-type Mode = 'list' | 'picking-view' | 'adding' | 'editing-task' | 'picking-agenda-for-task' | 'adding-project' | 'editing-project' | 'settings' | 'creating-sphere' | 'picking-sphere-for-agenda' | 'creating-agenda'
+type Mode = 'list' | 'picking-view' | 'adding' | 'editing-task' | 'editing-description' | 'picking-agenda-for-task' | 'adding-project' | 'editing-project' | 'settings' | 'creating-sphere' | 'picking-sphere-for-agenda' | 'creating-agenda'
 
 const VIEW_CONFIG = {
   tasks:    { label: 'Tasks',    key: 't', hasTasks: true  },
@@ -29,6 +29,15 @@ const VIEW_CONFIG = {
 
 const TOP_LEVEL_VIEWS = (['tasks', 'projects'] as const).filter(v => VIEW_CONFIG[v].key !== undefined)
 const SETTINGS_OPTIONS = ['Create Sphere', 'Create Agenda'] as const
+
+interface Shortcut {
+  key: string
+  label: string
+  row: 'state' | 'view'
+  when?: boolean
+  show?: boolean
+  action: () => void
+}
 
 function App() {
   const [state, setState] = useState<ProjectionState>(() => store.getState())
@@ -115,8 +124,133 @@ function App() {
     }
   }
 
+  const shortcuts: Shortcut[] = [
+    {
+      key: 'v', label: 'view', row: 'view',
+      show: view !== 'project',
+      action: () => {
+        const idx = view === 'project' ? TOP_LEVEL_VIEWS.indexOf('projects') : TOP_LEVEL_VIEWS.indexOf(view as 'tasks' | 'projects')
+        setViewPickerSelected(Math.max(0, idx))
+        setMode('picking-view')
+      },
+    },
+    {
+      key: 'q', label: 'new', row: 'state',
+      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      action: () => setMode('adding'),
+    },
+    {
+      key: 'q', label: 'new', row: 'state',
+      when: view === 'projects' && !showArchived,
+      action: () => setMode('adding-project'),
+    },
+    {
+      key: 'e', label: 'edit', row: 'state',
+      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      action: () => {
+        const task = (view === 'project' ? projectTasks : tasks)[selected]
+        if (task !== undefined) { setFormValue(task.title); setMode('editing-task') }
+      },
+    },
+    {
+      key: 'd', label: 'description', row: 'state',
+      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      action: () => {
+        const task = (view === 'project' ? projectTasks : tasks)[selected]
+        if (task !== undefined) { setFormValue(task.description); setMode('editing-description') }
+      },
+    },
+    {
+      key: 'e', label: 'edit', row: 'state',
+      when: view === 'projects' && !showArchived,
+      action: () => {
+        const project = projects[selected]
+        if (project !== undefined) { setFormValue(project.name); setMode('editing-project') }
+      },
+    },
+    {
+      key: 'c', label: showCompleted ? 'reopen' : 'complete', row: 'state',
+      when: VIEW_CONFIG[view].hasTasks,
+      action: () => {
+        const task = (view === 'project' ? projectTasks : tasks)[selected]
+        if (task !== undefined) {
+          store.appendEvents(showCompleted ? uncompleteTask(state, task.id) : completeTask(state, task.id))
+          const newState = refreshState()
+          const status = showCompleted ? 'completed' : 'open'
+          const newTasks = view === 'project' && activeProjectId !== undefined
+            ? listTasks(newState, { projectId: activeProjectId, status })
+            : activeSphere !== undefined
+              ? listTasks(newState, { sphereId: activeSphere.id, status })
+              : []
+          setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
+        }
+      },
+    },
+    {
+      key: 'n', label: 'next', row: 'state',
+      when: view === 'project' && !showCompleted,
+      action: () => {
+        const task = projectTasks[selected]
+        if (task !== undefined) {
+          appendAndRefresh(updateTask(state, { taskId: task.id, patch: { isNext: task.isNext !== true } }))
+        }
+      },
+    },
+    {
+      key: 'a', label: 'agenda', row: 'state',
+      when: VIEW_CONFIG[view].hasTasks && !showCompleted,
+      action: () => {
+        const task = (view === 'project' ? projectTasks : tasks)[selected]
+        if (task !== undefined) {
+          const currentIdx = task.agendaId !== undefined ? agendas.findIndex(a => a.id === task.agendaId) + 1 : 0
+          setAgendaPickerSelected(Math.max(0, currentIdx))
+          setMode('picking-agenda-for-task')
+        }
+      },
+    },
+    {
+      key: 'x', label: showArchived ? 'unarchive' : 'archive', row: 'state',
+      when: view === 'projects',
+      action: () => {
+        const project = projects[selected]
+        if (project !== undefined) {
+          store.appendEvents(project.isArchived ? unarchiveProject(state, project.id) : archiveProject(state, project.id))
+          const newState = refreshState()
+          const newProjects = activeSphere !== undefined
+            ? listProjects(newState, { sphereId: activeSphere.id, isArchived: showArchived })
+            : []
+          setSelected(i => Math.max(0, Math.min(i, newProjects.length - 1)))
+        }
+      },
+    },
+    {
+      key: 'C', label: showCompleted ? 'open' : 'completed', row: 'view',
+      when: VIEW_CONFIG[view].hasTasks,
+      action: () => { setShowCompleted(v => !v); setSelected(0) },
+    },
+    {
+      key: 'X', label: showArchived ? 'active' : 'archived', row: 'view',
+      when: view === 'projects',
+      action: () => { setShowArchived(v => !v); setSelected(0) },
+    },
+    {
+      key: ']', label: 'sphere', row: 'view',
+      show: view !== 'project',
+      action: () => {
+        const idx = spheres.findIndex(s => s.id === activeSphere?.id)
+        setCurrentSphereId(spheres[(idx + 1) % spheres.length]?.id)
+        if (view === 'project') { setView('projects'); setSelected(0) }
+      },
+    },
+    {
+      key: 'k', label: 'settings', row: 'view',
+      show: view !== 'project',
+      action: () => setMode('settings'),
+    },
+  ]
+
   useInput((input, key) => {
-    if (mode === 'adding' || mode === 'editing-task' || mode === 'adding-project' || mode === 'editing-project' || mode === 'creating-sphere' || mode === 'creating-agenda') {
+    if (mode === 'adding' || mode === 'editing-task' || mode === 'editing-description' || mode === 'adding-project' || mode === 'editing-project' || mode === 'creating-sphere' || mode === 'creating-agenda') {
       if (key.escape) {
         setFormValue('')
         setMode(mode === 'creating-sphere' || mode === 'creating-agenda' ? 'settings' : 'list')
@@ -179,71 +313,6 @@ function App() {
         setSelected(Math.max(0, projects.findIndex(p => p.id === activeProjectId)))
       } else exit()
     }
-    if (input === 'v') {
-      const idx = view === 'project' ? TOP_LEVEL_VIEWS.indexOf('projects') : TOP_LEVEL_VIEWS.indexOf(view as 'tasks' | 'projects')
-      setViewPickerSelected(Math.max(0, idx))
-      setMode('picking-view')
-    }
-    if (input === 'q' && !showCompleted) {
-      if (view === 'projects' && !showArchived) setMode('adding-project')
-      else if (view !== 'projects') setMode('adding')
-    }
-    if (input === 'e') {
-      if (view === 'projects') {
-        const project = projects[selected]
-        if (project !== undefined) { setFormValue(project.name); setMode('editing-project') }
-      } else {
-        const task = (view === 'project' ? projectTasks : tasks)[selected]
-        if (task !== undefined) { setFormValue(task.title); setMode('editing-task') }
-      }
-    }
-    if (input === 'x' && view === 'projects') {
-      const project = projects[selected]
-      if (project !== undefined) {
-        store.appendEvents(project.isArchived ? unarchiveProject(state, project.id) : archiveProject(state, project.id))
-        const newState = refreshState()
-        const newProjects = activeSphere !== undefined
-          ? listProjects(newState, { sphereId: activeSphere.id, isArchived: showArchived })
-          : []
-        setSelected(i => Math.max(0, Math.min(i, newProjects.length - 1)))
-      }
-    }
-    if (input === 'X' && view === 'projects') {
-      setShowArchived(v => !v)
-      setSelected(0)
-    }
-    if (input === 'a' && VIEW_CONFIG[view].hasTasks) {
-      const task = (view === 'project' ? projectTasks : tasks)[selected]
-      if (task !== undefined) {
-        const currentIdx = task.agendaId !== undefined ? agendas.findIndex(a => a.id === task.agendaId) + 1 : 0
-        setAgendaPickerSelected(Math.max(0, currentIdx))
-        setMode('picking-agenda-for-task')
-      }
-    }
-    if (input === 'C' && VIEW_CONFIG[view].hasTasks) {
-      setShowCompleted(v => !v)
-      setSelected(0)
-    }
-    if (input === 'c' && VIEW_CONFIG[view].hasTasks) {
-      const task = (view === 'project' ? projectTasks : tasks)[selected]
-      if (task !== undefined) {
-        store.appendEvents(showCompleted ? uncompleteTask(state, task.id) : completeTask(state, task.id))
-        const newState = refreshState()
-        const status = showCompleted ? 'completed' : 'open'
-        const newTasks = view === 'project' && activeProjectId !== undefined
-          ? listTasks(newState, { projectId: activeProjectId, status })
-          : activeSphere !== undefined
-            ? listTasks(newState, { sphereId: activeSphere.id, status })
-            : []
-        setSelected(i => Math.max(0, Math.min(i, newTasks.length - 1)))
-      }
-    }
-    if (input === 'n' && view === 'project' && !showCompleted) {
-      const task = projectTasks[selected]
-      if (task !== undefined) {
-        appendAndRefresh(updateTask(state, { taskId: task.id, patch: { isNext: task.isNext !== true } }))
-      }
-    }
     if (key.return && view === 'projects') {
       const project = projects[selected]
       if (project !== undefined) {
@@ -252,14 +321,9 @@ function App() {
         setSelected(0)
       }
     }
-    if (input === 'k') setMode('settings')
-    if (input === ']') {
-      const idx = spheres.findIndex(s => s.id === activeSphere?.id)
-      setCurrentSphereId(spheres[(idx + 1) % spheres.length]?.id)
-      if (view === 'project') { setView('projects'); setSelected(0) }
-    }
     if (key.upArrow) setSelected(i => Math.max(0, i - 1))
     if (key.downArrow) setSelected(i => Math.min(listLength - 1, i + 1))
+    shortcuts.find(s => s.key === input && (s.when ?? true))?.action()
   })
 
   function handleTaskSubmit(title: string) {
@@ -284,6 +348,15 @@ function App() {
     const task = (view === 'project' ? projectTasks : tasks)[selected]
     if (trimmed && task !== undefined) {
       appendAndRefresh(updateTask(state, { taskId: task.id, patch: { title: trimmed } }))
+    }
+    setFormValue('')
+    setMode('list')
+  }
+
+  function handleEditDescriptionSubmit(description: string) {
+    const task = (view === 'project' ? projectTasks : tasks)[selected]
+    if (task !== undefined) {
+      appendAndRefresh(updateTask(state, { taskId: task.id, patch: { description: description.trim() } }))
     }
     setFormValue('')
     setMode('list')
@@ -395,6 +468,16 @@ function App() {
   } else {
     const completedTag = showCompleted && VIEW_CONFIG[view].hasTasks ? <Text color="yellow"> completed</Text> : null
     const archivedTag = showArchived && view === 'projects' ? <Text color="yellow"> archived</Text> : null
+    const visible = (s: Shortcut) => s.show ?? s.when ?? true
+    const stateRow = shortcuts.filter(s => s.row === 'state' && visible(s)).map(s => `${s.key} ${s.label}`)
+    const viewRow = ['↑↓ navigate', ...shortcuts.filter(s => s.row === 'view' && visible(s)).map(s => `${s.key} ${s.label}`)]
+    if (view === 'project') viewRow.push('esc back')
+    const listHint = (
+      <Box flexDirection="column">
+        {stateRow.length > 0 && <Text dimColor>{stateRow.join('  ')}</Text>}
+        <Text dimColor>{viewRow.join('  ')}</Text>
+      </Box>
+    )
     title = view === 'project'
       ? <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {activeProject?.name ?? ''}</Text>{completedTag}</>
       : <><Text bold color="cyan">{activeSphere?.name ?? 'Palimpsest'}</Text><Text dimColor> — {VIEW_CONFIG[view].label}</Text>{archivedTag}{completedTag}</>
@@ -434,6 +517,11 @@ function App() {
         <Text>Edit task: </Text>
         <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditSubmit} />
       </Box>
+    ) : mode === 'editing-description' ? (
+      <Box>
+        <Text>Description: </Text>
+        <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditDescriptionSubmit} />
+      </Box>
     ) : mode === 'adding-project' ? (
       activeSphere === undefined ? (
         <Text color="red">No spheres found — create a sphere first.</Text>
@@ -448,13 +536,7 @@ function App() {
         <Text>Edit project: </Text>
         <TextInput value={formValue} onChange={setFormValue} onSubmit={handleEditProjectSubmit} />
       </Box>
-    ) : view === 'project' ? (
-      <Text dimColor>↑↓ navigate  {showCompleted ? 'c reopen  ' : 'q new  e edit  c complete  n next  a agenda  '}C {showCompleted ? 'open' : 'completed'}  esc back</Text>
-    ) : view === 'projects' ? (
-      <Text dimColor>↑↓ navigate  v view  {showArchived ? 'x unarchive  X active' : 'q new  e edit  x archive  X archived'}  ] sphere  k settings</Text>
-    ) : (
-      <Text dimColor>↑↓ navigate  v view  {showCompleted ? 'c reopen  ' : 'q new  e edit  c complete  a agenda  '}C {showCompleted ? 'open' : 'completed'}  ] sphere  k settings</Text>
-    )
+    ) : listHint
   }
 
   return (
