@@ -11,3 +11,4 @@
 - [ ] Pick list screen for choosing work to do, separated by contexts
 - [ ] Agenda view listing tasks for a particular agenda, separated by isWaiting
 - [ ] Assign a context to a task
+- [ ] Search across tasks and projects
